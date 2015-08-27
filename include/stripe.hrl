@@ -147,6 +147,7 @@
                         zar | % south african rand
                         zmw.  % zambian kwacha
 -type customer_id()  :: binary(). % cu_* | cus_*  (docs show both in use)
+-type auth_key()  :: binary(). % cu_* | cus_*  (docs show both in use)
 -type coupon_id()    :: binary(). % user specidied coupon ID
 -type plan_id()      :: binary(). % user specified plan ID
 -type charge_id()    :: binary(). % ch_*
@@ -337,3 +338,7 @@
                           description    :: desc(),
                           recipient      :: recipient_id(),
                           statement_descriptor :: desc()}).
+
+
+-record(stripe_delete, {id     :: customer_id() | plan_id() | coupon_id() | invoice_id(),
+  status :: true| false}).
