@@ -3,7 +3,7 @@
 -module(stripe).
 
 -export([token_create/11, token_create_bank/3]).
--export([customer_create/4, customer_get/2, customer_update/4]).
+-export([customer_create/4, customer_get/2, customer_update/4,customer_delete/2]).
 -export([charge_customer/5, charge_card/5]).
 -export([subscription_update/3, subscription_update/5,
   subscription_update/6, subscription_cancel/2, subscription_cancel/3]).
@@ -13,7 +13,7 @@
 -export([invoiceitem_create/4]).
 -export([gen_paginated_url/1, gen_paginated_url/2,
   gen_paginated_url/3, gen_paginated_url/4]).
--export([get_all_customers/0, get_num_customers/1]).
+-export([get_all_customers/1, get_num_customers/1]).
 -export([auth_key/0]).
 -include("stripe.hrl").
 
@@ -27,16 +27,16 @@
 %%%--------------------------------------------------------------------
 %%% Charging
 %%%--------------------------------------------------------------------
--spec charge_customer(price(), currency(), customer_id(), desc(),any()) -> result.
+-spec charge_customer(price(), currency(), customer_id(), desc(),auth_key()) -> result.
 charge_customer(Amount, Currency, Customer, Desc,AuthKey) ->
   charge(Amount, Currency, {customer, Customer}, Desc,AuthKey).
 
--spec charge_card(price(), currency(), token_id(), desc(),any()) -> result.
+-spec charge_card(price(), currency(), token_id(), desc(),auth_key()) -> result.
 charge_card(Amount, Currency, Card, Desc,AuthKey) ->
   charge(Amount, Currency, {card, Card}, Desc,AuthKey).
 
 -spec charge(price(), currency(),
-    {customer, customer_id()} | {card, token_id()}, desc(),any()) -> result.
+    {customer, customer_id()} | {card, token_id()}, desc(),auth_key()) -> result.
 charge(Amount, Currency, CustomerOrCard, Desc,AuthKey) when
   Amount > 50 andalso is_tuple(CustomerOrCard) ->
   Fields = [{amount, Amount},
@@ -49,7 +49,7 @@ charge(Amount, Currency, CustomerOrCard, Desc,AuthKey) when
 %%%--------------------------------------------------------------------
 %%% Customer Creation
 %%%--------------------------------------------------------------------
--spec customer_create(token_id(), email(), desc(),any()) -> result.
+-spec customer_create(token_id(), email(), desc(),auth_key()) -> result.
 customer_create(Card, Email, Desc,AuthKey) ->
   Fields = [{card, Card},
     {email, Email},
@@ -58,9 +58,17 @@ customer_create(Card, Email, Desc,AuthKey) ->
   request_customer_create(Fields).
 
 %%%--------------------------------------------------------------------
+%%% Customer Delete
+%%%--------------------------------------------------------------------
+-spec customer_delete(customer_id(),auth_key()) -> result.
+customer_delete(CustomerId,AuthKey) ->
+  request_customer_delete(CustomerId,AuthKey).
+
+
+%%%--------------------------------------------------------------------
 %%% Customer Fetching
 %%%--------------------------------------------------------------------
--spec customer_get(customer_id(),any()) -> result.
+-spec customer_get(customer_id(),auth_key()) -> result.
 customer_get(CustomerId,AuthKey) ->
   request_customer(CustomerId,AuthKey).
 
@@ -77,8 +85,7 @@ customer_update(CustomerId, Token, Email,AuthKey) ->
 %%%--------------------------------------------------------------------
 %%% Token Generation
 %%%--------------------------------------------------------------------
-token_create(CardNumber, ExpMon, ExpYr, Cvc,
-    Name, Addr1, Addr2, Zip, State, Country,AuthKey) ->
+token_create(CardNumber, ExpMon, ExpYr, Cvc,Name, Addr1, Addr2, Zip, State, Country,AuthKey) ->
   Fields = [{"card[number]", CardNumber},
     {"card[exp_month]", ExpMon},
     {"card[exp_year]", ExpYr},
@@ -94,7 +101,8 @@ token_create(CardNumber, ExpMon, ExpYr, Cvc,
   request_token_create(Fields).
 
 token_create_bank(Country, RoutingNumber, AccountNumber) ->
-  Fields = [{"bank_account[country]", Country},
+  Fields =
+    [{"bank_account[country]", Country},
     {"bank_account[routing_number]", RoutingNumber},
     {"bank_account[account_number]", AccountNumber}],
   request_token_create(Fields).
@@ -184,8 +192,8 @@ invoiceitem_create(Customer, Amount, Currency, Description) ->
 %%% Pagination Support
 %%%--------------------------------------------------------------------
 
-get_all_customers() ->
-  request_all_customers().
+get_all_customers(AuthKey) ->
+  request_all_customers(AuthKey).
 
 get_num_customers(Count) ->
   request_num_customers(Count).
@@ -201,6 +209,9 @@ request_event(EventId) ->
 
 request_customer(CustomerId,AuthKey) ->
   request_run(gen_customer_url(CustomerId), get, [{auth_key,AuthKey}]).
+
+request_customer_delete(CustomerId,AuthKey) ->
+  request_run(gen_customer_url(CustomerId), delete, [{auth_key,AuthKey}]).
 
 request_invoiceitem(InvoiceItemId) ->
   request_run(gen_invoiceitem_url(InvoiceItemId), get, []).
@@ -251,8 +262,8 @@ request_subscription(unsubscribe, Customer, Subscription, Fields, _AtEnd = true)
 request_subscription(unsubscribe, Customer, Subscription,Fields, _AtEnd = false) ->
   request_run(gen_subscription_url(Customer, Subscription), delete, Fields).
 
-request_all_customers() ->
-  request_all(customers).
+request_all_customers(AuthKey) ->
+  request_all(customers,AuthKey).
 
 request_num_customers(Count) when Count =< ?STRIPE_LIST_LIMIT ->
   request_run(gen_paginated_url(customers, Count), get, []);
@@ -264,12 +275,12 @@ request_num_customers(Count) ->
 %% This will continue to call ?STRIPE_LIST_LIMIT items
 %% until no items are remaining. If attempting to test
 %% be sure to set large timeouts for listing huge accounts
-request_all(Type) ->
-  request_all(Type, []).
-request_all(Type, StartingAfter) ->
+request_all(Type,AuthKey) ->
+  request_all(Type, [],AuthKey).
+request_all(Type, StartingAfter,AuthKey) ->
   case request_run_all(gen_paginated_url(Type,
     ?STRIPE_LIST_LIMIT,
-    StartingAfter)) of
+    StartingAfter),[{auth_key,AuthKey}]) of
     {error, Reason} ->
       {error, Reason};
     {false, Results} ->
@@ -278,7 +289,7 @@ request_all(Type, StartingAfter) ->
       TypeList = Results#stripe_list.data,
       LastElement = lists:last(TypeList),
       LastElementId = get_record_id(LastElement),
-      TypeList ++ request_all(Type, LastElementId)
+      TypeList ++ request_all(Type, LastElementId,AuthKey)
   end.
 
 get_record_id(Type) when is_record(Type, stripe_customer) ->
@@ -308,10 +319,10 @@ request_run(URL, Method, Fields) ->
 %%   {error, Reason} - Same as request_run
 %%   {false, Results} - No more results left, returns current page list
 %%   {true, Results} - There are more results left, returns current page list
-request_run_all(URL) ->
+request_run_all(URL,Fields) ->
   Headers = [{"X-Stripe-Client-User-Agent", ua_json()},
     {"User-Agent", "Stripe/v1 ErlangBindings/" ++ ?VSN_STR},
-    {"Authorization", auth_key()}],
+    {"Authorization", auth_key(Fields)}],
   Request = {URL, Headers},
   Requested = httpc:request(get, Request, [], []),
 
@@ -368,6 +379,10 @@ json_to_record(<<"list">>, DecodedResult) ->
   Data = ?V(data),
   #stripe_list{data = [json_to_record(Object) || Object <- Data]};
 
+json_to_record(<<"list_to_proplist">>, DecodedResult) ->
+  Data = ?V(data),
+  [json_to_record(Object) || Object <- Data];
+
 json_to_record(<<"event">>, DecodedResult) ->
   Data = ?V(data),
   Object = proplists:get_value(<<"object">>, Data),
@@ -400,12 +415,15 @@ json_to_record(<<"token">>, DecodedResult) ->
     bank_account = proplist_to_bank_account(?V(bank_account))};
 
 json_to_record(<<"customer">>, DecodedResult) ->
+  Data=json_to_record(<<"list_to_proplist">>,proplists:get_value(<<"sources">>,DecodedResult)),
+
   #stripe_customer{id              = ?V(id),
     description     = ?V(description),
     livemode        = ?V(livemode),
     created         = ?V(created),
     email           = ?V(email),
     delinquent      = ?V(delinquent),
+    data            = Data,
     discount        = json_to_record(<<"discount">>, ?V(discount)),
     account_balance = ?V(account_balance)};
 
@@ -468,15 +486,30 @@ json_to_record(<<"recipient">>, DecodedResult) ->
 
 json_to_record(<<"transfer">>, DecodedResult) ->
   #stripe_transfer{id           = ?V(id),
-    amount       = ?V(amount),
-    currency     = check_to_atom(?V(currency)),
-    date         = ?V(date),
-    balance_transaction = ?V(balance_transaction),
-    status       = check_to_atom(?V(status)),
-    account      = proplist_to_bank_account(?V(account)),
-    description  = ?V(description),
-    recipient    = ?V(recipient),
-    statement_descriptor = ?V(statement_descriptor)};
+      amount       = ?V(amount),
+      currency     = check_to_atom(?V(currency)),
+      date         = ?V(date),
+      balance_transaction = ?V(balance_transaction),
+      status       = check_to_atom(?V(status)),
+      account      = proplist_to_bank_account(?V(account)),
+      description  = ?V(description),
+      recipient    = ?V(recipient),
+      statement_descriptor = ?V(statement_descriptor)};
+
+json_to_record(undefined, [{<<"deleted">>, Status}, {<<"id">>, ObjectId}]) ->
+    #stripe_delete{id     = ObjectId,
+                   status = Status};
+
+json_to_record(<<"card">>,DecodedResult) ->
+  #stripe_card{name                = ?V(name),
+      last4               = ?V(last4),
+      exp_month           = ?V(exp_month),
+      exp_year            = ?V(exp_year),
+      brand               = ?V(brand),
+      cvc_check           = check_to_atom(?V(cvc_check)),
+      address_line1_check = check_to_atom(?V(address_line1_check)),
+      address_zip_check   = check_to_atom(?V(address_zip_check)),
+      country             = ?V(country)};
 
 json_to_record(Type, DecodedResult) ->
   error_logger:error_msg({unimplemented, ?MODULE, json_to_record, Type, DecodedResult}),
@@ -487,41 +520,42 @@ proplist_to_card(A) when is_binary(A) -> A;
 proplist_to_card(Card) ->
   DecodedResult = Card,
   #stripe_card{name                = ?V(name),
-    last4               = ?V(last4),
-    exp_month           = ?V(exp_month),
-    exp_year            = ?V(exp_year),
-    brand               = ?V(brand),
-    cvc_check           = check_to_atom(?V(cvc_check)),
-    address_line1_check = check_to_atom(?V(address_line1_check)),
-    address_zip_check   = check_to_atom(?V(address_zip_check)),
-    country             = ?V(country)}.
+      last4               = ?V(last4),
+      exp_month           = ?V(exp_month),
+      exp_year            = ?V(exp_year),
+      brand               = ?V(brand),
+      cvc_check           = check_to_atom(?V(cvc_check)),
+      address_line1_check = check_to_atom(?V(address_line1_check)),
+      address_zip_check   = check_to_atom(?V(address_zip_check)),
+      country             = ?V(country)}.
 
 proplist_to_plan(Plan) ->
   DecodedResult = Plan,
   #stripe_plan{id             = ?V(id),
-    currency       = check_to_atom(?V(currency)),
-    interval       = ?V(interval),
-    interval_count = ?V(interval_count),
-    name           = ?V(name),
-    amount         = ?V(amount),
-    livemode       = ?V(livemode)}.
+      currency       = check_to_atom(?V(currency)),
+      interval       = ?V(interval),
+      interval_count = ?V(interval_count),
+      name           = ?V(name),
+      amount         = ?V(amount),
+      livemode       = ?V(livemode)}.
 
 proplist_to_bank_account(null) -> null;
 proplist_to_bank_account(A) when is_binary(A) -> A;
 proplist_to_bank_account(BankAccount) ->
   DecodedResult = BankAccount,
   #stripe_bank_account{fingerprint = ?V(fingerprint),
-    bank_name  = ?V(bank_name),
-    last4      = ?V(last4),
-    country    = ?V(country),
-    validated  = ?V(validated),
-    description = ?V(description),
-    recipient  = ?V(recipient),
-    statement_descriptor = ?V(statement_descriptor)}.
+      bank_name  = ?V(bank_name),
+      last4      = ?V(last4),
+      country    = ?V(country),
+      validated  = ?V(validated),
+      description = ?V(description),
+      recipient  = ?V(recipient),
+      statement_descriptor = ?V(statement_descriptor)}.
 
 check_to_atom(null) -> null;
 check_to_atom(A) when is_atom(A) -> A;
 check_to_atom(Check) when is_binary(Check) -> binary_to_atom(Check, utf8).
+
 
 % error range conditions stolen from stripe-python
 json_to_error(ErrCode, Body) ->
@@ -535,6 +569,7 @@ json_to_error(ErrCode, Body) ->
                      _ -> unknown_error
                    end,
   json_to_error(ErrCode, ErrCodeMeaning, Body).
+
 
 % Let's use a common error object/record instead of breaking out per-type
 % errors.  We can match on error types easily.
@@ -635,10 +670,13 @@ gen_event_url(EventId) when is_list(EventId) ->
 
 gen_paginated_url(Type) ->
   gen_paginated_url(Type, 10, [], []).
+
 gen_paginated_url(Type, Limit) ->
   gen_paginated_url(Type, Limit, [], []).
+
 gen_paginated_url(Type, Limit, StartingAfter) ->
   gen_paginated_url(Type, Limit, StartingAfter, []).
+
 gen_paginated_url(Type, Limit, StartingAfter, EndingBefore) ->
   Arguments = gen_args([{"limit", Limit},
     {"starting_after", StartingAfter},
