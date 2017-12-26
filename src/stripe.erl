@@ -3,8 +3,9 @@
 -module(stripe).
 
 -export([token_create/11, token_create_bank/3]).
--export([customer_create/4, customer_get/2, customer_update/4,customer_delete/2]).
--export([charge_customer/5, charge_card/5]).
+-export([customer_create/4,customer_create/5, customer_get/2, customer_update/4,customer_delete/2]).
+-export([card_create/3,card_delete/3]).
+-export([charge_customer/5, charge_card/5,charge_customer_card/6]).
 -export([subscription_update/3, subscription_update/5,
   subscription_update/6, subscription_cancel/2, subscription_cancel/3]).
 -export([customer/2, event/1, invoiceitem/1]).
@@ -20,6 +21,12 @@
 -define(VSN_BIN, <<"0.8.0">>).
 -define(VSN_STR, binary_to_list(?VSN_BIN)).
 
+
+%% test
+%% -compile(export_all).
+
+%%
+
 % Stripe limit for paginated requests, change
 % this number if stripe changes it in the future
 % See: https://stripe.com/docs/api#pagination
@@ -34,6 +41,16 @@ charge_customer(Amount, Currency, Customer, Desc,AuthKey) ->
 -spec charge_card(price(), currency(), token_id(), desc(),auth_key()) -> result.
 charge_card(Amount, Currency, Card, Desc,AuthKey) ->
   charge(Amount, Currency, {card, Card}, Desc,AuthKey).
+
+-spec charge_customer_card(price(), currency(), card_id(),customer_id(), desc(),auth_key()) -> result.
+charge_customer_card(Amount, Currency, Card, Customer, Desc,AuthKey) when Amount > 50 ->
+  Fields = [{amount, Amount},
+    {currency, Currency},
+    {source,Card},
+    {customer,Customer},
+    {description, Desc},
+    {auth_key,AuthKey}],
+  request_charge(Fields).
 
 -spec charge(price(), currency(),
     {customer, customer_id()} | {card, token_id()}, desc(),auth_key()) -> result.
@@ -54,6 +71,18 @@ customer_create(Card, Email, Desc,AuthKey) ->
   Fields = [{card, Card},
     {email, Email},
     {description, Desc},
+    {auth_key,AuthKey}],
+  request_customer_create(Fields).
+
+%%%--------------------------------------------------------------------
+%%% Customer Creation
+%%%--------------------------------------------------------------------
+-spec customer_create(token_id(), email(), binary(), desc(),auth_key()) -> result.
+customer_create(Card, Email, SadeemId, Desc,AuthKey) ->
+  Fields = [{card, Card},
+    {email, Email},
+    {description, Desc},
+    {'metadata[sadeem_id]',SadeemId},
     {auth_key,AuthKey}],
   request_customer_create(Fields).
 
@@ -82,6 +111,14 @@ customer_update(CustomerId, Token, Email,AuthKey) ->
     {auth_key,AuthKey}],
   request_customer_update(CustomerId, Fields).
 
+card_create(CustomerId, Token,AuthKey)->
+  Fields = [{"card", Token},
+    {auth_key,AuthKey}],
+  request_card_create(CustomerId, Fields).
+
+card_delete(CustomerId, CardId,AuthKey)->
+  Fields = [{auth_key,AuthKey}],
+  request_card_delete(CustomerId,CardId,Fields).
 %%%--------------------------------------------------------------------
 %%% Token Generation
 %%%--------------------------------------------------------------------
@@ -213,6 +250,12 @@ request_customer(CustomerId,AuthKey) ->
 request_customer_delete(CustomerId,AuthKey) ->
   request_run(gen_customer_url(CustomerId), delete, [{auth_key,AuthKey}]).
 
+request_card_create(CustomerId,Fields)->
+  request_run(gen_sources_url(CustomerId), post, Fields).
+
+request_card_delete(CustomerId,CardId,Fields)->
+  request_run(gen_sources_url(CustomerId,CardId), delete, Fields).
+
 request_invoiceitem(InvoiceItemId) ->
   request_run(gen_invoiceitem_url(InvoiceItemId), get, []).
 
@@ -311,6 +354,7 @@ request_run(URL, Method, Fields) ->
               _ -> {URL, Headers, Type, Body}
             end,
   Requested = httpc:request(Method, Request, [], []),
+
   resolve(Requested).
 
 %% Much like request_run/3 except that a tuple is returned with the
@@ -501,7 +545,10 @@ json_to_record(undefined, [{<<"deleted">>, Status}, {<<"id">>, ObjectId}]) ->
                    status = Status};
 
 json_to_record(<<"card">>,DecodedResult) ->
-  #stripe_card{name                = ?V(name),
+
+  #stripe_card{
+      id                  =?V(id),
+      name                = ?V(name),
       last4               = ?V(last4),
       exp_month           = ?V(exp_month),
       exp_year            = ?V(exp_year),
@@ -689,3 +736,18 @@ gen_paginated_base_url(customers) ->
   "https://api.stripe.com/v1/customers?";
 gen_paginated_base_url(invoices) ->
   "https://api.stripe.com/v1/invoices?".
+
+
+gen_sources_url(CustomerId) when is_binary(CustomerId) ->
+  gen_sources_url(binary_to_list(CustomerId));
+gen_sources_url(CustomerId) when is_list(CustomerId) ->
+  "https://api.stripe.com/v1/customers/" ++ CustomerId ++"/sources".
+
+gen_sources_url(CustomerId,CardId) when is_binary(CustomerId) and is_binary(CardId) ->
+  gen_sources_url(binary_to_list(CustomerId),binary_to_list(CardId));
+gen_sources_url(CustomerId,CardId) when is_list(CustomerId) and is_binary(CardId) ->
+  gen_sources_url(CustomerId,binary_to_list(CardId));
+gen_sources_url(CustomerId,CardId) when is_binary(CustomerId) and is_list(CardId) ->
+  gen_sources_url(binary_to_list(CustomerId),CardId);
+gen_sources_url(CustomerId,CardId) when is_list(CustomerId) and is_list(CardId) ->
+  "https://api.stripe.com/v1/customers/" ++ CustomerId ++"/sources/"++CardId.

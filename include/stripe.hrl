@@ -147,6 +147,7 @@
                       zar | % south african rand
                       zmw.  % zambian kwacha
 -type customer_id()     :: binary(). % cu_* | cus_*  (docs show both in use)
+-type card_id()         :: binary().
 -type auth_key()        :: binary(). % cu_* | cus_*  (docs show both in use)
 -type coupon_id()       :: binary(). % user specidied coupon ID
 -type plan_id()         :: binary(). % user specified plan ID
@@ -210,7 +211,9 @@
 %%%--------------------------------------------------------------------
 %%% Records / Stripe Objects
 %%%--------------------------------------------------------------------
--record(stripe_card, {name       :: name(),
+-record(stripe_card, {
+                      id         :: binary(),
+                      name       :: name(),
                       last4      :: binary(),
                       exp_year   :: 2011..3000,
                       exp_month  :: 1..12,
