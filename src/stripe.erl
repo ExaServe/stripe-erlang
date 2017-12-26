@@ -78,11 +78,11 @@ customer_create(Card, Email, Desc,AuthKey) ->
 %%% Customer Creation
 %%%--------------------------------------------------------------------
 -spec customer_create(token_id(), email(), binary(), desc(),auth_key()) -> result.
-customer_create(Card, Email, SadeemId, Desc,AuthKey) ->
+customer_create(Card, Email, ClientId, Desc,AuthKey) ->
   Fields = [{card, Card},
     {email, Email},
     {description, Desc},
-    {'metadata[sadeem_id]',SadeemId},
+    {'metadata[clientId_id]',ClientId},
     {auth_key,AuthKey}],
   request_customer_create(Fields).
 
