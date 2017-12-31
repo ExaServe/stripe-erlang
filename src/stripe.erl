@@ -5,7 +5,7 @@
 -export([token_create/11, token_create_bank/3]).
 -export([customer_create/4,customer_create/5, customer_get/2, customer_update/4,customer_delete/2]).
 -export([card_create/3,card_delete/3]).
--export([charge_customer/5, charge_card/5,charge_customer_card/6]).
+-export([charge_customer/5, charge_card/5,charge_customer_card/6,charge_source/5]).
 -export([subscription_update/3, subscription_update/5,
   subscription_update/6, subscription_cancel/2, subscription_cancel/3]).
 -export([customer/2, event/1, invoiceitem/1]).
@@ -16,6 +16,9 @@
   gen_paginated_url/3, gen_paginated_url/4]).
 -export([get_all_customers/1, get_num_customers/1]).
 -export([auth_key/0]).
+
+-export([source/2]).
+-export([sources_3d_secure/5]).
 -include("stripe.hrl").
 
 -define(VSN_BIN, <<"0.8.0">>).
@@ -41,6 +44,10 @@ charge_customer(Amount, Currency, Customer, Desc,AuthKey) ->
 -spec charge_card(price(), currency(), token_id(), desc(),auth_key()) -> result.
 charge_card(Amount, Currency, Card, Desc,AuthKey) ->
   charge(Amount, Currency, {card, Card}, Desc,AuthKey).
+
+-spec charge_source(price(), currency(), token_id(), desc(),auth_key()) -> result.
+charge_source(Amount, Currency, Card, Desc,AuthKey) ->
+  charge(Amount, Currency, {source, Card}, Desc,AuthKey).
 
 -spec charge_customer_card(price(), currency(), card_id(),customer_id(), desc(),auth_key()) -> result.
 charge_customer_card(Amount, Currency, Card, Customer, Desc,AuthKey) when Amount > 50 ->
@@ -119,6 +126,33 @@ card_create(CustomerId, Token,AuthKey)->
 card_delete(CustomerId, CardId,AuthKey)->
   Fields = [{auth_key,AuthKey}],
   request_card_delete(CustomerId,CardId,Fields).
+
+
+-spec sources_3d_secure(source_id(),price(),currency(),binary()|list(),any())->any().
+sources_3d_secure(SourceId,Amount,Currency,ReturnUrl,AuthKey)->
+  Fields =
+    [
+      {
+        auth_key,AuthKey
+      },
+      {
+        "amount",Amount
+      },
+      {
+        "currency",Currency
+      },
+      {
+        "type",<<"three_d_secure">>
+      },
+      {
+        "redirect[return_url]",ReturnUrl
+      },
+      {
+        "three_d_secure[card]",SourceId
+      }
+    ],
+
+  request_sources_3d_secure(Fields).
 %%%--------------------------------------------------------------------
 %%% Token Generation
 %%%--------------------------------------------------------------------
@@ -211,6 +245,10 @@ event(EventId) ->
 customer(CustomerId,AuthKey) ->
   request_customer(CustomerId,AuthKey).
 
+
+source(SourceId, AuthKey)->
+  request_source(SourceId, AuthKey).
+
 %%%--------------------------------------------------------------------
 %%% InvoiceItem Support
 %%%--------------------------------------------------------------------
@@ -244,6 +282,9 @@ request_charge(Fields) ->
 request_event(EventId) ->
   request_run(gen_event_url(EventId), get, []).
 
+request_source(SourceId, AuthKey)->
+  request_run(gen_source_url(SourceId),get,[{auth_key,AuthKey}]).
+
 request_customer(CustomerId,AuthKey) ->
   request_run(gen_customer_url(CustomerId), get, [{auth_key,AuthKey}]).
 
@@ -255,6 +296,9 @@ request_card_create(CustomerId,Fields)->
 
 request_card_delete(CustomerId,CardId,Fields)->
   request_run(gen_sources_url(CustomerId,CardId), delete, Fields).
+
+request_sources_3d_secure(Fields)->
+  request_run(gen_sources_url(), post, Fields).
 
 request_invoiceitem(InvoiceItemId) ->
   request_run(gen_invoiceitem_url(InvoiceItemId), get, []).
@@ -558,6 +602,30 @@ json_to_record(<<"card">>,DecodedResult) ->
       address_zip_check   = check_to_atom(?V(address_zip_check)),
       country             = ?V(country)};
 
+json_to_record(<<"source">>,DecodedResult)->
+
+  Redirect=proplists:get_value(<<"redirect">>,DecodedResult,[]),
+  io:format("PP ~p~n",[Redirect]),
+
+  RedirectUrl= proplists:get_value(<<"url">>,Redirect,<<"/">>),
+  RedirectStatus= proplists:get_value(<<"status">>,Redirect,<<>>),
+  ThreeDSecure=proplists:get_value(<<"three_d_secure">>,DecodedResult,[]),
+  SourceCardId= proplists:get_value(<<"card">>,ThreeDSecure,<<>>),
+  SourceCardAuth= proplists:get_value(<<"authenticated">>,ThreeDSecure,false),
+
+  #stripe_source{
+    id =?V(id),
+    client_secret=?V(client_secret),
+    flow=?V(flow),
+    redirect_url=RedirectUrl,
+    redirect_status=RedirectStatus,
+    status=?V(status),
+    amount= ?V(amount),
+    currency=?V(currency),
+    three_d_secure_card_id=SourceCardId,
+    three_d_secure_card_authenticated=SourceCardAuth,
+    raw_data = DecodedResult
+  };
 json_to_record(Type, DecodedResult) ->
   error_logger:error_msg({unimplemented, ?MODULE, json_to_record, Type, DecodedResult}),
   {not_implemented_yet, Type, DecodedResult}.
@@ -737,6 +805,17 @@ gen_paginated_base_url(customers) ->
 gen_paginated_base_url(invoices) ->
   "https://api.stripe.com/v1/invoices?".
 
+
+
+
+gen_source_url(SourceId)  when is_binary(SourceId) ->
+  gen_source_url(binary_to_list(SourceId));
+gen_source_url(SourceId) when is_list(SourceId)->
+  "https://api.stripe.com/v1/source/"++SourceId.
+
+
+gen_sources_url() ->
+  "https://api.stripe.com/v1/sources".
 
 gen_sources_url(CustomerId) when is_binary(CustomerId) ->
   gen_sources_url(binary_to_list(CustomerId));

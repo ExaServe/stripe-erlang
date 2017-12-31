@@ -158,6 +158,7 @@
 -type recipient_id()    :: binary().   % rp_*
 -type transfer_id()     :: binary().   % tr_*
 -type balance_txn()     :: binary().   % txn_*
+-type source_id()       :: binary().   % src_*
 -type bank_name()       :: binary() | string().
 -type last4()           :: binary() | string().
 -type name()            :: binary() | string().
@@ -351,6 +352,18 @@
                           recipient      :: recipient_id(),
                           statement_descriptor :: desc()}).
 
+-record(stripe_source, {id               :: source_id(),
+                        client_secret    ::binary(),
+                        flow             ::binary(),
+                        redirect_url     ::binary(),
+                        redirect_status  ::binary(),
+                        status           ::binary(),
+                        three_d_secure_card ::binary(),
+                        amount           ::integer(),
+                        currency         ::currency(),
+                        three_d_secure_card_id ::binary(),
+                        three_d_secure_card_authenticated ::boolean(),
+                        raw_data         ::proplist()}).
 
 -record(stripe_delete, {id     :: customer_id() | plan_id() | coupon_id() | invoice_id(),
   status :: true| false}).
