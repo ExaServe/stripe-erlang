@@ -5,7 +5,8 @@
 -export([token_create/11, token_create_bank/3]).
 -export([customer_create/4,customer_create/5, customer_get/2, customer_update/4,customer_delete/2]).
 -export([card_create/3,card_delete/3]).
--export([charge_customer/5, charge_card/5,charge_customer_card/6,charge_source/5]).
+-export([charge_customer/5, charge_card/5,charge_customer_card/6,charge_source/5,charge_source/6]).
+
 -export([subscription_update/3, subscription_update/5,
   subscription_update/6, subscription_cancel/2, subscription_cancel/3]).
 -export([customer/2, event/1, invoiceitem/1]).
@@ -48,6 +49,10 @@ charge_card(Amount, Currency, Card, Desc,AuthKey) ->
 -spec charge_source(price(), currency(), token_id(), desc(),auth_key()) -> result.
 charge_source(Amount, Currency, Card, Desc,AuthKey) ->
   charge(Amount, Currency, {source, Card}, Desc,AuthKey).
+
+-spec charge_source(price(), currency(), token_id(), customer_id(), desc(), auth_key()) -> result.
+charge_source(Amount, Currency, Card, Customer, Desc,AuthKey) ->
+  charge_customer_card(Amount, Currency, Card, Customer, Desc,AuthKey).
 
 -spec charge_customer_card(price(), currency(), card_id(),customer_id(), desc(),auth_key()) -> result.
 charge_customer_card(Amount, Currency, Card, Customer, Desc,AuthKey) when Amount > 50 ->
@@ -131,25 +136,12 @@ card_delete(CustomerId, CardId,AuthKey)->
 -spec sources_3d_secure(source_id(),price(),currency(),binary()|list(),any())->any().
 sources_3d_secure(SourceId,Amount,Currency,ReturnUrl,AuthKey)->
   Fields =
-    [
-      {
-        auth_key,AuthKey
-      },
-      {
-        "amount",Amount
-      },
-      {
-        "currency",Currency
-      },
-      {
-        "type",<<"three_d_secure">>
-      },
-      {
-        "redirect[return_url]",ReturnUrl
-      },
-      {
-        "three_d_secure[card]",SourceId
-      }
+    [{auth_key,AuthKey},
+      {"amount",Amount},
+      {"currency",Currency},
+      {"type",<<"three_d_secure">>},
+      {"redirect[return_url]",ReturnUrl},
+      {"three_d_secure[card]",SourceId}
     ],
 
   request_sources_3d_secure(Fields).
@@ -591,7 +583,7 @@ json_to_record(undefined, [{<<"deleted">>, Status}, {<<"id">>, ObjectId}]) ->
 json_to_record(<<"card">>,DecodedResult) ->
 
   #stripe_card{
-      id                  =?V(id),
+      id                  = ?V(id),
       name                = ?V(name),
       last4               = ?V(last4),
       exp_month           = ?V(exp_month),
@@ -603,10 +595,68 @@ json_to_record(<<"card">>,DecodedResult) ->
       country             = ?V(country)};
 
 json_to_record(<<"source">>,DecodedResult)->
+  Type= proplists:get_value(<<"type">>,DecodedResult,<<>>),
+  json_to_record({<<"source">>,Type},DecodedResult);
+
+
+json_to_record({<<"source">>,<<"three_d_secure">>},DecodedResult)->
 
   Redirect=proplists:get_value(<<"redirect">>,DecodedResult,[]),
-  io:format("PP ~p~n",[Redirect]),
+  RedirectUrl= proplists:get_value(<<"url">>,Redirect,<<"/">>),
+  RedirectReturnUrl= proplists:get_value(<<"return_url">>,Redirect,<<"/">>),
+  RedirectStatus= proplists:get_value(<<"status">>,Redirect,<<>>),
 
+
+  ThreeDSecure=proplists:get_value(<<"three_d_secure">>,DecodedResult,[]),
+  SourceCardId= proplists:get_value(<<"card">>,ThreeDSecure,<<>>),
+  SourceCardCustomer= proplists:get_value(<<"customer">>,ThreeDSecure,<<>>),
+  SourceCardAuth= proplists:get_value(<<"authenticated">>,ThreeDSecure,false),
+
+  #stripe_source_three_d{
+    id                            =   ?V(id),
+    amount                        =   ?V(amount),
+    currency                      =   ?V(currency),
+    client_secret                 =   ?V(client_secret),
+    flow                          =   ?V(flow),
+    redirect_return_url           =   RedirectReturnUrl,
+    redirect_status               =   RedirectStatus,
+    redirect_url                  =   RedirectUrl,
+    status                        =   ?V(status),
+    usage                         =   ?V(usage),
+    three_d_secure_card           =   SourceCardId,
+    three_d_secure_customer       =   SourceCardCustomer,
+    three_d_secure_authenticated  =   SourceCardAuth
+  };
+
+
+json_to_record({<<"source">>,<<"card">>},DecodedResult)->
+
+  SourceCard= proplists:get_value(<<"card">>,DecodedResult,[]),
+  Name= proplists:get_value(<<"name">>,SourceCard,<<>>),
+  Last4= proplists:get_value(<<"last4">>,SourceCard,<<>>),
+  ExpYear= proplists:get_value(<<"exp_year">>,SourceCard,<<>>),
+  ExpMonth= proplists:get_value(<<"exp_month">>,SourceCard,<<>>),
+  Country= proplists:get_value(<<"country">>,SourceCard,<<>>),
+  ThreeDSecure= proplists:get_value(<<"three_d_secure">>,SourceCard,<<>>),
+
+
+  #stripe_source_card{
+    id                            =   ?V(id),
+    client_secret                 =   ?V(client_secret),
+    status                        =   ?V(status),
+    customer                      =   ?V(customer),
+    usage                         =   ?V(usage),
+    name                          =   Name,
+    last4                         =   Last4,
+    exp_month                     =   ExpMonth,
+    exp_year                      =   ExpYear,
+    country                       =   Country,
+    three_d_secure                =   ThreeDSecure
+  };
+
+json_to_record({<<"source">>,_},DecodedResult)->
+
+  Redirect=proplists:get_value(<<"redirect">>,DecodedResult,[]),
   RedirectUrl= proplists:get_value(<<"url">>,Redirect,<<"/">>),
   RedirectStatus= proplists:get_value(<<"status">>,Redirect,<<>>),
   ThreeDSecure=proplists:get_value(<<"three_d_secure">>,DecodedResult,[]),
@@ -626,6 +676,9 @@ json_to_record(<<"source">>,DecodedResult)->
     three_d_secure_card_authenticated=SourceCardAuth,
     raw_data = DecodedResult
   };
+
+
+
 json_to_record(Type, DecodedResult) ->
   error_logger:error_msg({unimplemented, ?MODULE, json_to_record, Type, DecodedResult}),
   {not_implemented_yet, Type, DecodedResult}.
@@ -811,7 +864,7 @@ gen_paginated_base_url(invoices) ->
 gen_source_url(SourceId)  when is_binary(SourceId) ->
   gen_source_url(binary_to_list(SourceId));
 gen_source_url(SourceId) when is_list(SourceId)->
-  "https://api.stripe.com/v1/source/"++SourceId.
+  "https://api.stripe.com/v1/sources/"++SourceId.
 
 
 gen_sources_url() ->

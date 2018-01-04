@@ -352,7 +352,7 @@
                           recipient      :: recipient_id(),
                           statement_descriptor :: desc()}).
 
--record(stripe_source, {id               :: source_id(),
+-record(stripe_source, {id               ::source_id(),
                         client_secret    ::binary(),
                         flow             ::binary(),
                         redirect_url     ::binary(),
@@ -364,6 +364,38 @@
                         three_d_secure_card_id ::binary(),
                         three_d_secure_card_authenticated ::boolean(),
                         raw_data         ::proplist()}).
+
+-record(stripe_source_card,{id               ::source_id(),
+                            status           ::binary(),%% todo add status type
+                            client_secret    ::binary(),
+                            customer         ::customer_id(),
+                            usage            ::binary(),
+                            name             ::name(),
+                            last4            ::binary(),
+                            exp_year         ::2018..3000,
+                            exp_month        ::1..12,
+                            brand            ::credit_provider(),
+                            cvc_check        ::check_result(),
+                            country          ::country(),
+                            three_d_secure   ::binary()
+}).
+
+
+-record(stripe_source_three_d,{id                      ::source_id(),
+                               currency                ::currency(),
+                               amount                  ::integer(),
+                               client_secret           ::binary(),
+                               flow                    ::binary(),
+                               redirect_return_url     ::binary(),
+                               redirect_status         ::binary(),
+                               redirect_url            ::binary(),
+                               status                  ::binary(),
+                               usage                   ::binary(),
+                               three_d_secure_card     ::binary(),
+                               three_d_secure_customer ::binary(),
+                               three_d_secure_authenticated ::boolean()
+}).
+
 
 -record(stripe_delete, {id     :: customer_id() | plan_id() | coupon_id() | invoice_id(),
   status :: true| false}).
