@@ -638,6 +638,7 @@ json_to_record({<<"source">>,<<"card">>},DecodedResult)->
   ExpMonth= proplists:get_value(<<"exp_month">>,SourceCard,<<>>),
   Country= proplists:get_value(<<"country">>,SourceCard,<<>>),
   ThreeDSecure= proplists:get_value(<<"three_d_secure">>,SourceCard,<<>>),
+  Brand= proplists:get_value(<<"brand">>,SourceCard,<<>>),
 
 
   #stripe_source_card{
@@ -646,6 +647,7 @@ json_to_record({<<"source">>,<<"card">>},DecodedResult)->
     status                        =   ?V(status),
     customer                      =   ?V(customer),
     usage                         =   ?V(usage),
+    brand                         =   Brand,
     name                          =   Name,
     last4                         =   Last4,
     exp_month                     =   ExpMonth,
